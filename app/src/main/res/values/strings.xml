@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MinimalBro</string>
+    <string name="accessibility_service_description">Optional minimal guard: redirects you back to MinimalBro when opening hidden apps during an active minimal detox session. Window content is never read.</string>
+</resources>
