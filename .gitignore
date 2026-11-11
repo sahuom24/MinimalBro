@@ -9,6 +9,8 @@ captures/
 .cxx/
 *.apk
 *.aab
+!release/*.apk
+!release/*.aab
 
 # Local signing material: never commit a keystore or its passwords.
 keystore.properties

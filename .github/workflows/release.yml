@@ -1,0 +1,146 @@
+name: Build, Release & Play Console Deploy
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      track:
+        description: 'Google Play track'
+        required: true
+        default: 'internal'
+        type: choice
+        options:
+          - internal
+          - alpha
+          - beta
+          - production
+      release_status:
+        description: 'Google Play release status (use draft until app is approved out of draft state)'
+        required: true
+        default: 'draft'
+        type: choice
+        options:
+          - draft
+          - completed
+          - inProgress
+          - halted
+
+permissions:
+  contents: write
+
+concurrency:
+  group: minimalbro-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build_and_release:
+    name: Test, Build & Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Detect signing and Play Console secrets
+        id: secrets_check
+        env:
+          HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.KEYSTORE_PASSWORD != '' && secrets.KEY_ALIAS != '' && secrets.KEY_PASSWORD != '' }}
+          HAS_PLAY: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+        run: |
+          echo "has_keystore=$HAS_KEYSTORE" >> "$GITHUB_OUTPUT"
+          echo "has_play=$HAS_PLAY" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure gradlew is executable
+        run: chmod +x gradlew
+
+      - name: Run unit tests & Release Lint
+        run: ./gradlew --no-daemon testDebugUnitTest lintVitalRelease
+
+      - name: Configure release signing from secrets
+        if: steps.secrets_check.outputs.has_keystore == 'true'
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS_VAL: ${{ secrets.KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          mkdir -p keystore
+          printf '%s' "$KEYSTORE_B64" | tr -d '\n\r ' | base64 -d > keystore/release-upload.jks
+          python3 -c 'import os, pathlib; esc=lambda v: v.replace("\\","\\\\"); pathlib.Path("keystore.properties").write_text(f"storeFile=keystore/release-upload.jks\nstorePassword={esc(os.environ[\"KEYSTORE_PASS\"])}\nkeyAlias={esc(os.environ[\"KEY_ALIAS_VAL\"])}\nkeyPassword={esc(os.environ[\"KEY_PASS\"])}\n", encoding="utf-8")'
+
+      - name: Build signed APK & Play Store AAB (from keystore secret)
+        if: steps.secrets_check.outputs.has_keystore == 'true'
+        run: ./gradlew --no-daemon bundleRelease assembleRelease
+
+      - name: Resolve release assets
+        id: assets
+        env:
+          HAS_KEYSTORE: ${{ steps.secrets_check.outputs.has_keystore }}
+        run: |
+          mkdir -p ci-release
+          if [ "$HAS_KEYSTORE" = "true" ]; then
+            VERSION_NAME=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
+            APK_OUT="ci-release/MinimalBro-${VERSION_NAME}-release.apk"
+            AAB_OUT="ci-release/MinimalBro-${VERSION_NAME}-playstore.aab"
+            cp app/build/outputs/apk/release/app-release.apk "$APK_OUT"
+            cp app/build/outputs/bundle/release/app-release.aab "$AAB_OUT"
+            (cd ci-release && sha256sum *.apk *.aab > SHA256SUMS.txt)
+            echo "aab_path=$AAB_OUT" >> "$GITHUB_OUTPUT"
+            echo "apk_path=$APK_OUT" >> "$GITHUB_OUTPUT"
+            echo "sums_path=ci-release/SHA256SUMS.txt" >> "$GITHUB_OUTPUT"
+          else
+            APK_PREBUILT=$(ls -1 release/*.apk | head -n1)
+            AAB_PREBUILT=$(ls -1 release/*.aab | head -n1)
+            cp "$APK_PREBUILT" ci-release/
+            cp "$AAB_PREBUILT" ci-release/
+            cp release/SHA256SUMS.txt ci-release/
+            echo "aab_path=$AAB_PREBUILT" >> "$GITHUB_OUTPUT"
+            echo "apk_path=$APK_PREBUILT" >> "$GITHUB_OUTPUT"
+            echo "sums_path=release/SHA256SUMS.txt" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Cleanup transient keystore material
+        if: always()
+        run: rm -rf keystore/release-upload.jks keystore.properties
+
+      - name: Upload workflow build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: MinimalBro-release-files
+          path: |
+            ${{ steps.assets.outputs.apk_path }}
+            ${{ steps.assets.outputs.aab_path }}
+            ${{ steps.assets.outputs.sums_path }}
+
+      - name: Create or update GitHub Release (on v* tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: MinimalBro ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.assets.outputs.apk_path }}
+            ${{ steps.assets.outputs.aab_path }}
+            ${{ steps.assets.outputs.sums_path }}
+
+      - name: Upload AAB to Google Play Console
+        if: steps.secrets_check.outputs.has_play == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.focusbro.minimal
+          releaseFiles: ${{ steps.assets.outputs.aab_path }}
+          track: ${{ inputs.track || 'internal' }}
+          status: ${{ inputs.release_status || 'draft' }}
