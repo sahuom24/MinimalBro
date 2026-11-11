@@ -2,6 +2,8 @@ package dev.minimalphone
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import dev.minimalphone.apps.LaunchableApp
 import dev.minimalphone.session.ActiveMinimalSession
@@ -50,7 +52,8 @@ class MinimalScreensTest {
             }
         }
 
-        compose.onNodeWithText("Minimal Tool 1").assertIsDisplayed()
+        compose.onAllNodesWithText("Minimal Tool 1").onFirst().assertIsDisplayed()
+        compose.onNodeWithText("Minimal Tool 3").assertIsDisplayed()
         compose.onNodeWithText("Minimal Tool 8").assertIsDisplayed()
         compose.onNodeWithText("Hold to exit Minimal").assertIsDisplayed()
     }

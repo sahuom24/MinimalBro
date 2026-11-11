@@ -24,8 +24,25 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Accept Android SDK licenses & ensure API 36
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKM=$(command -v sdkmanager || find "$SDK_ROOT" -name sdkmanager -type f 2>/dev/null | head -n1 || true)
+          if [ -n "$SDKM" ]; then
+            yes | "$SDKM" --licenses > /dev/null 2>&1 || true
+            if [ ! -d "$SDK_ROOT/platforms/android-36" ]; then
+              yes | "$SDKM" "platforms;android-36" "build-tools;36.0.0" || true
+            fi
+          fi
+
       - name: Ensure gradlew is executable
         run: chmod +x gradlew
 
-      - name: Run unit tests and Release Lint
-        run: ./gradlew --no-daemon testDebugUnitTest lintVitalRelease
+      - name: Compile tests & Release Lint
+        run: ./gradlew --no-daemon compileDebugUnitTestKotlin compileReleaseUnitTestKotlin lintVitalRelease
+
+      - name: Run pure JVM logic unit tests
+        run: ./gradlew --no-daemon testDebugUnitTest --tests "dev.minimalphone.MinimalLogicTest"
+
+      - name: Run full Robolectric unit test suite
+        run: ./gradlew --no-daemon testDebugUnitTest --stacktrace
