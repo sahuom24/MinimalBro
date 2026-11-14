@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -68,12 +70,14 @@ import dev.minimalphone.session.MicroSessionManager
 import dev.minimalphone.session.Wallpaper
 import dev.minimalphone.ui.theme.LocalMinimalPalette
 import dev.minimalphone.ui.theme.wallpaperBrush
+import dev.minimalphone.ui.widgets.WidgetsPage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun MinimalHomeScreen(
     active: ActiveMinimalSession,
@@ -95,6 +99,7 @@ fun MinimalHomeScreen(
     var holdProgress by remember { mutableFloatStateOf(0f) }
     var speedBumpTarget by remember { mutableStateOf<Pair<LaunchableApp, AppTier>?>(null) }
     var cooldownTarget by remember { mutableStateOf<Pair<LaunchableApp, Int>?>(null) }
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 2 })
 
     val handleAppClick: (LaunchableApp) -> Unit = { app ->
         if (MicroSessionManager.isInCooldown(app.packageName)) {
@@ -227,158 +232,204 @@ fun MinimalHomeScreen(
                 }
             }
 
-            if (favoriteApps.isNotEmpty() && searchQuery.isBlank()) {
-                Spacer(Modifier.height(12.dp))
-                Row(
+            // Subtle 2-dot page indicator between Apps and Widgets
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    favoriteApps.forEach { fav ->
-                        Surface(
-                            onClick = { handleAppClick(fav) },
-                            shape = RoundedCornerShape(999.dp),
-                            color = colors.primaryContainer.copy(alpha = 0.65f),
-                            border = BorderStroke(1.dp, palette.subtleBorder),
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                if (showAppIcons) {
-                                    AppIcon(packageName = fav.packageName, size = 18.dp)
-                                    Spacer(Modifier.width(7.dp))
-                                }
-                                Text(
-                                    text = fav.label,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = colors.onPrimaryContainer,
-                                )
-                            }
-                        }
-                    }
-                }
+                        .size(if (pagerState.currentPage == 0) 18.dp else 6.dp, 6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(
+                            if (pagerState.currentPage == 0) colors.primary else colors.onSurfaceVariant.copy(alpha = 0.35f),
+                        )
+                        .clickable { scope.launch { pagerState.animateScrollToPage(0) } },
+                )
+                Spacer(Modifier.width(6.dp))
+                Box(
+                    modifier = Modifier
+                        .size(if (pagerState.currentPage == 1) 18.dp else 6.dp, 6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(
+                            if (pagerState.currentPage == 1) colors.primary else colors.onSurfaceVariant.copy(alpha = 0.35f),
+                        )
+                        .clickable { scope.launch { pagerState.animateScrollToPage(1) } },
+                )
             }
 
-            Spacer(Modifier.height(12.dp))
-
-            // Instant search across all allowed apps
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = {
-                    Text(
-                        text = "Search apps (${allowedApps.size})...",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Search",
-                        modifier = Modifier.size(18.dp),
-                    )
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Clear",
-                                modifier = Modifier.size(16.dp),
-                            )
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(18.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = colors.surface.copy(alpha = 0.78f),
-                    unfocusedContainerColor = colors.surface.copy(alpha = 0.58f),
-                    focusedBorderColor = colors.primary.copy(alpha = 0.6f),
-                    unfocusedBorderColor = palette.subtleBorder,
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            Spacer(Modifier.height(10.dp))
-
-            // Clean alphabetical distraction-free app list
-            LazyColumn(
+            HorizontalPager(
+                state = pagerState,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                contentPadding = PaddingValues(vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                if (filteredApps.isEmpty()) {
-                    item {
-                        Text(
-                            text = if (allowedApps.isEmpty()) {
-                                "Calm Home active. Phone & Messages remain available below."
-                            } else {
-                                "No app matches \"$searchQuery\""
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 24.dp, horizontal = 8.dp),
-                        )
-                    }
-                } else {
-                    items(filteredApps, key = { it.packageName }) { app ->
-                        val appTier = active.appTiers[app.packageName] ?: AppTierClassifier.suggestTier(app.packageName, app.label)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .clickable { handleAppClick(app) }
-                                .padding(horizontal = 10.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (showAppIcons) {
-                                AppIcon(packageName = app.packageName, size = 28.dp)
-                            } else {
-                                val dotColor = when (appTier) {
-                                    AppTier.TIER_0 -> colors.primary.copy(alpha = 0.65f)
-                                    AppTier.TIER_1 -> colors.secondary.copy(alpha = 0.85f)
-                                    AppTier.TIER_2 -> colors.error.copy(alpha = 0.75f)
+            ) { page ->
+                if (page == 0) {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        if (favoriteApps.isNotEmpty() && searchQuery.isBlank()) {
+                            Spacer(Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                favoriteApps.forEach { fav ->
+                                    Surface(
+                                        onClick = { handleAppClick(fav) },
+                                        shape = RoundedCornerShape(999.dp),
+                                        color = colors.primaryContainer.copy(alpha = 0.65f),
+                                        border = BorderStroke(1.dp, palette.subtleBorder),
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            if (showAppIcons) {
+                                                AppIcon(packageName = fav.packageName, size = 18.dp)
+                                                Spacer(Modifier.width(7.dp))
+                                            }
+                                            Text(
+                                                text = fav.label,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = colors.onPrimaryContainer,
+                                            )
+                                        }
+                                    }
                                 }
-                                Box(
-                                    modifier = Modifier
-                                        .size(7.dp)
-                                        .clip(CircleShape)
-                                        .background(dotColor),
-                                )
                             }
-                            Spacer(Modifier.width(14.dp))
-                            Text(
-                                text = app.label,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Normal,
-                                color = colors.onBackground,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            if (appTier == AppTier.TIER_1) {
+                        }
+
+                        Spacer(Modifier.height(10.dp))
+
+                        // Instant search across all allowed apps
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = {
                                 Text(
-                                    text = "5m",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = colors.onSurfaceVariant.copy(alpha = 0.6f),
-                                    modifier = Modifier.padding(horizontal = 6.dp),
+                                    text = "Search apps (${allowedApps.size})...",
+                                    style = MaterialTheme.typography.bodySmall,
                                 )
-                            } else if (appTier == AppTier.TIER_2) {
-                                Text(
-                                    text = "Trap",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = colors.error.copy(alpha = 0.7f),
-                                    modifier = Modifier.padding(horizontal = 6.dp),
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = "Search",
+                                    modifier = Modifier.size(18.dp),
                                 )
+                            },
+                            trailingIcon = {
+                                if (searchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { searchQuery = "" }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Clear",
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(18.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = colors.surface.copy(alpha = 0.78f),
+                                unfocusedContainerColor = colors.surface.copy(alpha = 0.58f),
+                                focusedBorderColor = colors.primary.copy(alpha = 0.6f),
+                                unfocusedBorderColor = palette.subtleBorder,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+
+                        Spacer(Modifier.height(8.dp))
+
+                        // Clean alphabetical distraction-free app list
+                        LazyColumn(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            contentPadding = PaddingValues(vertical = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            if (filteredApps.isEmpty()) {
+                                item {
+                                    Text(
+                                        text = if (allowedApps.isEmpty()) {
+                                            "Calm Home active. Phone & Messages remain available below."
+                                        } else {
+                                            "No app matches \"$searchQuery\""
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = colors.onSurfaceVariant,
+                                        modifier = Modifier.padding(vertical = 24.dp, horizontal = 8.dp),
+                                    )
+                                }
+                            } else {
+                                items(filteredApps, key = { it.packageName }) { app ->
+                                    val appTier = active.appTiers[app.packageName] ?: AppTierClassifier.suggestTier(app.packageName, app.label)
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .clickable { handleAppClick(app) }
+                                            .padding(horizontal = 10.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        if (showAppIcons) {
+                                            AppIcon(packageName = app.packageName, size = 28.dp)
+                                        } else {
+                                            val dotColor = when (appTier) {
+                                                AppTier.TIER_0 -> colors.primary.copy(alpha = 0.65f)
+                                                AppTier.TIER_1 -> colors.secondary.copy(alpha = 0.85f)
+                                                AppTier.TIER_2 -> colors.error.copy(alpha = 0.75f)
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(7.dp)
+                                                    .clip(CircleShape)
+                                                    .background(dotColor),
+                                            )
+                                        }
+                                        Spacer(Modifier.width(14.dp))
+                                        Text(
+                                            text = app.label,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Normal,
+                                            color = colors.onBackground,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        if (appTier == AppTier.TIER_1) {
+                                            Text(
+                                                text = "5m",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = colors.onSurfaceVariant.copy(alpha = 0.6f),
+                                                modifier = Modifier.padding(horizontal = 6.dp),
+                                            )
+                                        } else if (appTier == AppTier.TIER_2) {
+                                            Text(
+                                                text = "Trap",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = colors.error.copy(alpha = 0.7f),
+                                                modifier = Modifier.padding(horizontal = 6.dp),
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
+                } else {
+                    WidgetsPage(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(top = 4.dp),
+                    )
                 }
             }
 

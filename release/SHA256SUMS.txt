@@ -1,1 +1,1 @@
-b513b71f7edc013f19d194e257a3c2d79d26646511a2ebc30d6a5a74166672d1  MinimalBro-1.0.0-release.apk
+49babae562dd58d999c1e7374f3f74476a13f77cc16f4d8b68e3f06fea2bb0bb  MinimalBro-1.0.0-release.apk
