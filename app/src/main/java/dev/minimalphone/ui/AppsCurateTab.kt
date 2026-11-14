@@ -42,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -76,6 +77,7 @@ fun AppsCurateTab(
 ) {
     val colors = MaterialTheme.colorScheme
     val palette = LocalMinimalPalette.current
+    val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(AppFilter.ALL) }
 
@@ -231,10 +233,10 @@ fun AppsCurateTab(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(18.dp))
                                 .clickable {
-                                    if (isAllowed) {
-                                        onSetAppTier(app.packageName, null)
-                                    } else {
-                                        onSetAppTier(app.packageName, currentTier)
+                                    val launchIntent = context.packageManager.getLaunchIntentForPackage(app.packageName)
+                                    if (launchIntent != null) {
+                                        launchIntent.flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                                        runCatching { context.startActivity(launchIntent) }
                                     }
                                 },
                         ) {

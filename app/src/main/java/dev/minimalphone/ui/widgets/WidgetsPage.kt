@@ -1,6 +1,8 @@
 package dev.minimalphone.ui.widgets
 
 import android.media.AudioManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -45,6 +47,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -72,6 +75,29 @@ fun WidgetsPage(
 
     val stepManager = remember { StepCountManager.get(context) }
     val steps by stepManager.dailySteps.collectAsState()
+
+    var hasCalendarPermission by remember {
+        mutableStateOf(CalendarEventsReader.hasCalendarPermission(context))
+    }
+    var todayEvents by remember {
+        mutableStateOf(CalendarEventsReader.readTodayEvents(context))
+    }
+
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { isGranted ->
+        hasCalendarPermission = isGranted
+        if (isGranted) {
+            todayEvents = CalendarEventsReader.readTodayEvents(context)
+        }
+    }
+
+    DisposableEffect(hasCalendarPermission) {
+        if (hasCalendarPermission) {
+            todayEvents = CalendarEventsReader.readTodayEvents(context)
+        }
+        onDispose {}
+    }
 
     DisposableEffect(Unit) {
         stepManager.register()
@@ -200,6 +226,126 @@ fun WidgetsPage(
                         }
                     }
                 }
+
+                Spacer(Modifier.height(14.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(palette.subtleBorder),
+                )
+                Spacer(Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "TODAY'S SCHEDULE",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.onSurfaceVariant,
+                    )
+                    if (hasCalendarPermission && todayEvents.isNotEmpty()) {
+                        Text(
+                            text = "${todayEvents.size} events",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.primary,
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                if (!hasCalendarPermission) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(colors.surfaceVariant.copy(alpha = 0.5f))
+                            .clickable {
+                                calendarPermissionLauncher.launch(android.Manifest.permission.READ_CALENDAR)
+                            }
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Show today's meetings & events",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium,
+                                color = colors.onSurface,
+                            )
+                            Text(
+                                text = "Tap to sync live agenda from calendar",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.onSurfaceVariant,
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = colors.primary,
+                        ) {
+                            Text(
+                                text = "Connect",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.onPrimary,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                            )
+                        }
+                    }
+                } else if (todayEvents.isEmpty()) {
+                    Text(
+                        text = "No events scheduled for today · Restful mind",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant.copy(alpha = 0.8f),
+                        modifier = Modifier.padding(vertical = 4.dp),
+                    )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        todayEvents.take(4).forEach { event ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(colors.surfaceVariant.copy(alpha = 0.4f))
+                                    .clickable { CalendarEventsReader.openEvent(context, event.id) }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .clip(CircleShape)
+                                        .background(colors.primary),
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = event.title,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = colors.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    val subtitle = event.formatTimeRange() +
+                                        if (!event.location.isNullOrBlank()) " · ${event.location}" else ""
+                                    Text(
+                                        text = subtitle,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = colors.primary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -263,8 +409,10 @@ fun WidgetsPage(
         // Widget 3: Step Count & Mindful Movement
         val stepGoal = 10_000
         val stepFraction = (steps.toFloat() / stepGoal.toFloat()).coerceIn(0f, 1f)
+        val healthApp = stepManager.detectedHealthApp
 
         Surface(
+            onClick = { StepCountManager.openHealthApp(context) },
             shape = RoundedCornerShape(24.dp),
             color = colors.surface.copy(alpha = 0.85f),
             border = BorderStroke(1.dp, palette.subtleBorder),
@@ -277,11 +425,28 @@ fun WidgetsPage(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column {
-                        Text(
-                            text = "Daily Movement",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = colors.onSurfaceVariant,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Daily Movement",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            val healthBadge = if (healthApp != null) "From ${healthApp.name} ↗" else "Health App ↗"
+                            Surface(
+                                shape = RoundedCornerShape(999.dp),
+                                color = colors.primaryContainer.copy(alpha = 0.6f),
+                            ) {
+                                Text(
+                                    text = healthBadge,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.onPrimaryContainer,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
                         Row(verticalAlignment = Alignment.Bottom) {
                             Text(
                                 text = "%,d".format(steps),

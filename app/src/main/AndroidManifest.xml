@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <uses-permission
@@ -50,6 +51,10 @@
         <package android:name="com.phonepe.app" />
         <package android:name="net.one97.paytm" />
         <package android:name="com.google.android.googlequicksearchbox" />
+        <package android:name="com.google.android.apps.fitness" />
+        <package android:name="com.samsung.android.health" />
+        <package android:name="com.google.android.apps.healthdata" />
+        <package android:name="com.fitbit.FitbitMobile" />
     </queries>
 
     <application

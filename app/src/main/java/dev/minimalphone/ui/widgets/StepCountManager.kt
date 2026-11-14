@@ -1,6 +1,7 @@
 package dev.minimalphone.ui.widgets
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -10,6 +11,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Calendar
+
+data class HealthAppInfo(
+    val packageName: String,
+    val name: String,
+)
 
 /**
  * Reads real-time hardware step counts for the current day.
@@ -30,6 +36,8 @@ class StepCountManager private constructor(context: Context) : SensorEventListen
 
     private val _hasSensor = MutableStateFlow(stepSensor != null)
     val hasSensor: StateFlow<Boolean> = _hasSensor.asStateFlow()
+
+    val detectedHealthApp: HealthAppInfo? = detectHealthApp(appContext)
 
     init {
         register()
@@ -90,6 +98,46 @@ class StepCountManager private constructor(context: Context) : SensorEventListen
         private const val KEY_SAVED_DAY = "saved_day"
         private const val KEY_BASE_OFFSET = "base_offset"
         private const val KEY_TODAY_STEPS = "today_steps"
+
+        private val HEALTH_APP_CANDIDATES = listOf(
+            "com.samsung.android.health" to "Samsung Health",
+            "com.google.android.apps.fitness" to "Google Fit",
+            "com.google.android.apps.healthdata" to "Health Connect",
+            "com.fitbit.FitbitMobile" to "Fitbit",
+            "com.mi.health" to "Mi Fitness",
+            "com.heytap.health.international" to "OHealth",
+        )
+
+        fun detectHealthApp(context: Context): HealthAppInfo? {
+            val pm = context.packageManager
+            for ((pkg, label) in HEALTH_APP_CANDIDATES) {
+                val isInstalled = runCatching {
+                    pm.getApplicationInfo(pkg, 0).enabled
+                }.getOrDefault(false)
+                if (isInstalled) {
+                    return HealthAppInfo(pkg, label)
+                }
+            }
+            return null
+        }
+
+        fun openHealthApp(context: Context) {
+            val detected = detectHealthApp(context)
+            if (detected != null) {
+                val launchIntent = context.packageManager.getLaunchIntentForPackage(detected.packageName)
+                if (launchIntent != null) {
+                    launchIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    if (runCatching { context.startActivity(launchIntent) }.isSuccess) {
+                        return
+                    }
+                }
+            }
+            // Fallback to Google Fit or Health Connect Play Store search
+            val storeIntent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse("market://search?q=health%20fitness")).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            runCatching { context.startActivity(storeIntent) }
+        }
 
         @Volatile
         private var instance: StepCountManager? = null

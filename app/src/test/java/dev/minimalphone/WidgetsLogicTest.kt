@@ -38,4 +38,11 @@ class WidgetsLogicTest {
         assertNotNull(manager)
         assertNotNull(manager.dailySteps.value)
     }
+
+    @Test
+    fun calendarEventsReaderHandlesPermissionGracefully() {
+        val hasPerm = dev.minimalphone.ui.widgets.CalendarEventsReader.hasCalendarPermission(context)
+        val events = dev.minimalphone.ui.widgets.CalendarEventsReader.readTodayEvents(context)
+        assertNotNull(events)
+    }
 }
