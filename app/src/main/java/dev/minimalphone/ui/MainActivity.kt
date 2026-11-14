@@ -78,6 +78,16 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         viewModel.sync()
     }
+
+    override fun onStart() {
+        super.onStart()
+        dev.minimalphone.ui.widgets.AppWidgetHostHelper.get(this).startListening()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        dev.minimalphone.ui.widgets.AppWidgetHostHelper.get(this).stopListening()
+    }
 }
 
 @Composable

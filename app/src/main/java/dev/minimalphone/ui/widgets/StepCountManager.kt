@@ -1,12 +1,16 @@
 package dev.minimalphone.ui.widgets
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Build
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -107,6 +111,17 @@ class StepCountManager private constructor(context: Context) : SensorEventListen
             "com.mi.health" to "Mi Fitness",
             "com.heytap.health.international" to "OHealth",
         )
+
+        fun hasActivityRecognitionPermission(context: Context): Boolean {
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACTIVITY_RECOGNITION,
+                ) == PackageManager.PERMISSION_GRANTED
+            } else {
+                true
+            }
+        }
 
         fun detectHealthApp(context: Context): HealthAppInfo? {
             val pm = context.packageManager

@@ -1,6 +1,9 @@
 package dev.minimalphone.ui.widgets
 
+import android.Manifest
+import android.content.Context
 import android.media.AudioManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -22,9 +25,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -47,8 +53,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.minimalphone.ui.theme.LocalMinimalPalette
@@ -58,12 +64,12 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Secondary Home Screen Page: Essential Bento Widgets.
- * Includes:
- * 1. Minimal Calendar & 7-day strip
+ * Essential Widgets Dashboard:
+ * 1. Native Android App Widgets (Google Calendar, Samsung Health, Google Fit, Spotify, etc.)
  * 2. Instant UPI QR Scanner
- * 3. Daily Step Counts
- * 4. Essential Utilities (Torch, Ringer mode, Daily Intention Scratchpad)
+ * 3. Daily Step Counts with runtime sensor permission & 1-tap official health widget linking
+ * 4. Minimal Calendar & 7-day strip
+ * 5. Quick Utilities (Torch, Ringer mode, Daily Intention Scratchpad)
  */
 @Composable
 fun WidgetsPage(
@@ -73,8 +79,24 @@ fun WidgetsPage(
     val colors = MaterialTheme.colorScheme
     val palette = LocalMinimalPalette.current
 
+    val appWidgetHelper = remember { AppWidgetHostHelper.get(context) }
+    val savedWidgetIds by appWidgetHelper.widgetIds.collectAsState()
+    var showAddWidgetSheet by remember { mutableStateOf(false) }
+
     val stepManager = remember { StepCountManager.get(context) }
     val steps by stepManager.dailySteps.collectAsState()
+    var hasActivityPermission by remember {
+        mutableStateOf(StepCountManager.hasActivityRecognitionPermission(context))
+    }
+
+    val activityPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { isGranted ->
+        hasActivityPermission = isGranted
+        if (isGranted) {
+            stepManager.register()
+        }
+    }
 
     var hasCalendarPermission by remember {
         mutableStateOf(CalendarEventsReader.hasCalendarPermission(context))
@@ -120,7 +142,7 @@ fun WidgetsPage(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        // Page header / title
+        // Page header / title + Add Native Widget Action
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -128,31 +150,278 @@ fun WidgetsPage(
         ) {
             Column {
                 Text(
-                    text = "Essentials",
+                    text = "Widgets & Tools",
                     style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Light,
+                    fontWeight = FontWeight.SemiBold,
                     color = colors.onBackground,
                 )
                 Text(
-                    text = "Daily glance & quick actions",
+                    text = "Native app widgets & quick tools",
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.onSurfaceVariant,
                 )
             }
             Surface(
+                onClick = { showAddWidgetSheet = true },
                 shape = RoundedCornerShape(999.dp),
-                color = colors.surfaceVariant.copy(alpha = 0.6f),
+                color = colors.primary,
             ) {
-                Text(
-                    text = "Page 2/2",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Add Widget",
+                        tint = colors.onPrimary,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "Add Widget",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.onPrimary,
+                    )
+                }
             }
         }
 
-        // Widget 1: Calendar Bento Card
+        // Section 1: Native Android App Widgets (Built by installed apps)
+        if (savedWidgetIds.isNotEmpty()) {
+            savedWidgetIds.forEach { widgetId ->
+                NativeAppWidgetCard(
+                    appWidgetId = widgetId,
+                    helper = appWidgetHelper,
+                    onRemove = { appWidgetHelper.deleteWidget(widgetId) },
+                )
+            }
+        } else {
+            // Friendly prompt to add official app widgets
+            Surface(
+                onClick = { showAddWidgetSheet = true },
+                shape = RoundedCornerShape(22.dp),
+                color = colors.surface.copy(alpha = 0.85f),
+                border = BorderStroke(1.dp, palette.subtleBorder),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .background(colors.primaryContainer.copy(alpha = 0.65f), CircleShape),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Add",
+                            tint = colors.primary,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Add Official App Widgets",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.onSurface,
+                        )
+                        Text(
+                            text = "Embed widgets from Google Calendar, Samsung Health, Google Fit, Spotify, etc.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+
+        // Widget 2: Instant UPI QR Scanner Bento Card
+        Surface(
+            onClick = { QuickToolsHelper.openUpiScanner(context) },
+            shape = RoundedCornerShape(24.dp),
+            color = colors.surface.copy(alpha = 0.85f),
+            border = BorderStroke(1.dp, palette.subtleBorder),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                modifier = Modifier.padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(46.dp)
+                        .background(colors.primaryContainer.copy(alpha = 0.65f), CircleShape),
+                ) {
+                    Text(
+                        text = "QR",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.primary,
+                    )
+                }
+
+                Spacer(Modifier.width(16.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "UPI Quick Scanner",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.onSurface,
+                    )
+                    Text(
+                        text = "Scan any QR code · GPay, PhonePe, Paytm",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = colors.primary,
+                ) {
+                    Text(
+                        text = "Scan",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.onPrimary,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                    )
+                }
+            }
+        }
+
+        // Widget 3: Step Count & Mindful Movement
+        val stepGoal = 10_000
+        val stepFraction = (steps.toFloat() / stepGoal.toFloat()).coerceIn(0f, 1f)
+        val healthApp = stepManager.detectedHealthApp
+
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = colors.surface.copy(alpha = 0.85f),
+            border = BorderStroke(1.dp, palette.subtleBorder),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(modifier = Modifier.padding(18.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Daily Movement",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            val healthBadge = if (healthApp != null) "${healthApp.name} ↗" else "Health App ↗"
+                            Surface(
+                                onClick = { StepCountManager.openHealthApp(context) },
+                                shape = RoundedCornerShape(999.dp),
+                                color = colors.primaryContainer.copy(alpha = 0.6f),
+                            ) {
+                                Text(
+                                    text = healthBadge,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.onPrimaryContainer,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(
+                                text = "%,d".format(steps),
+                                style = TextStyle(
+                                    fontSize = 28.sp,
+                                    fontWeight = FontWeight.Light,
+                                    color = colors.onSurface,
+                                    fontFeatureSettings = "tnum",
+                                ),
+                            )
+                            Text(
+                                text = " / %,d steps".format(stepGoal),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 4.dp, start = 4.dp),
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "${(stepFraction * 100).toInt()}%",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.primary,
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                LinearProgressIndicator(
+                    progress = { stepFraction },
+                    color = colors.primary,
+                    trackColor = colors.surfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (!hasActivityPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        Surface(
+                            onClick = {
+                                activityPermissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+                            },
+                            shape = RoundedCornerShape(999.dp),
+                            color = colors.secondaryContainer.copy(alpha = 0.7f),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(
+                                text = "Grant Step Permission",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.onSecondaryContainer,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
+
+                    Surface(
+                        onClick = { showAddWidgetSheet = true },
+                        shape = RoundedCornerShape(999.dp),
+                        color = colors.primaryContainer.copy(alpha = 0.6f),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(
+                            text = "+ Add Health Widget",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.onPrimaryContainer,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
+
+        // Widget 4: Minimal Calendar Bento Card
         Surface(
             onClick = { QuickToolsHelper.openCalendar(context) },
             shape = RoundedCornerShape(24.dp),
@@ -182,7 +451,7 @@ fun WidgetsPage(
                         )
                     }
                     Text(
-                        text = "Open",
+                        text = "Open App",
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.primary,
                     )
@@ -249,7 +518,7 @@ fun WidgetsPage(
                     )
                     if (hasCalendarPermission && todayEvents.isNotEmpty()) {
                         Text(
-                            text = "${todayEvents.size} events",
+                            text = "${todayEvents.size} event${if (todayEvents.size > 1) "s" else ""}",
                             style = MaterialTheme.typography.labelSmall,
                             color = colors.primary,
                         )
@@ -259,88 +528,77 @@ fun WidgetsPage(
                 Spacer(Modifier.height(8.dp))
 
                 if (!hasCalendarPermission) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(colors.surfaceVariant.copy(alpha = 0.5f))
-                            .clickable {
-                                calendarPermissionLauncher.launch(android.Manifest.permission.READ_CALENDAR)
-                            }
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
+                    Surface(
+                        onClick = {
+                            calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        color = colors.surfaceVariant.copy(alpha = 0.5f),
+                        border = BorderStroke(1.dp, palette.subtleBorder),
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
                             Text(
-                                text = "Show today's meetings & events",
+                                text = "Sync with Calendar app",
                                 style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Medium,
                                 color = colors.onSurface,
                             )
                             Text(
-                                text = "Tap to sync live agenda from calendar",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = colors.onSurfaceVariant,
-                            )
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(999.dp),
-                            color = colors.primary,
-                        ) {
-                            Text(
-                                text = "Connect",
+                                text = "Grant permission",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = colors.onPrimary,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                                color = colors.primary,
                             )
                         }
                     }
                 } else if (todayEvents.isEmpty()) {
                     Text(
-                        text = "No events scheduled for today · Restful mind",
+                        text = "No scheduled events for today. Enjoy your day!",
                         style = MaterialTheme.typography.bodySmall,
-                        color = colors.onSurfaceVariant.copy(alpha = 0.8f),
+                        color = colors.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 4.dp),
                     )
                 } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         todayEvents.take(4).forEach { event ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(colors.surfaceVariant.copy(alpha = 0.4f))
-                                    .clickable { CalendarEventsReader.openEvent(context, event.id) }
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                            Surface(
+                                onClick = { CalendarEventsReader.openEvent(context, event.id) },
+                                shape = RoundedCornerShape(12.dp),
+                                color = colors.surfaceVariant.copy(alpha = 0.35f),
+                                modifier = Modifier.fillMaxWidth(),
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .clip(CircleShape)
-                                        .background(colors.primary),
-                                )
-                                Spacer(Modifier.width(10.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = event.title,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = colors.onSurface,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(colors.primary),
                                     )
-                                    val subtitle = event.formatTimeRange() +
-                                        if (!event.location.isNullOrBlank()) " · ${event.location}" else ""
-                                    Text(
-                                        text = subtitle,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = colors.primary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = event.title,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Medium,
+                                            color = colors.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            text = event.formatTimeRange() + (if (!event.location.isNullOrBlank()) " · ${event.location}" else ""),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = colors.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -349,146 +607,7 @@ fun WidgetsPage(
             }
         }
 
-        // Widget 2: Instant UPI QR Scanner Bento Card
-        Surface(
-            onClick = { QuickToolsHelper.openUpiScanner(context) },
-            shape = RoundedCornerShape(24.dp),
-            color = colors.surface.copy(alpha = 0.85f),
-            border = BorderStroke(1.dp, palette.subtleBorder),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Row(
-                modifier = Modifier.padding(18.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(colors.primaryContainer.copy(alpha = 0.65f), CircleShape),
-                ) {
-                    Text(
-                        text = "QR",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.primary,
-                    )
-                }
-
-                Spacer(Modifier.width(16.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "UPI Quick Scanner",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.onSurface,
-                    )
-                    Text(
-                        text = "Tap to scan any QR code · GPay, PhonePe, Paytm",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.onSurfaceVariant,
-                    )
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(999.dp),
-                    color = colors.primary,
-                ) {
-                    Text(
-                        text = "Scan",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.onPrimary,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                    )
-                }
-            }
-        }
-
-        // Widget 3: Step Count & Mindful Movement
-        val stepGoal = 10_000
-        val stepFraction = (steps.toFloat() / stepGoal.toFloat()).coerceIn(0f, 1f)
-        val healthApp = stepManager.detectedHealthApp
-
-        Surface(
-            onClick = { StepCountManager.openHealthApp(context) },
-            shape = RoundedCornerShape(24.dp),
-            color = colors.surface.copy(alpha = 0.85f),
-            border = BorderStroke(1.dp, palette.subtleBorder),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(modifier = Modifier.padding(18.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Daily Movement",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = colors.onSurfaceVariant,
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            val healthBadge = if (healthApp != null) "From ${healthApp.name} ↗" else "Health App ↗"
-                            Surface(
-                                shape = RoundedCornerShape(999.dp),
-                                color = colors.primaryContainer.copy(alpha = 0.6f),
-                            ) {
-                                Text(
-                                    text = healthBadge,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = colors.onPrimaryContainer,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            Text(
-                                text = "%,d".format(steps),
-                                style = TextStyle(
-                                    fontSize = 28.sp,
-                                    fontWeight = FontWeight.Light,
-                                    color = colors.onSurface,
-                                    fontFeatureSettings = "tnum",
-                                ),
-                            )
-                            Text(
-                                text = " / %,d steps".format(stepGoal),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = colors.onSurfaceVariant,
-                                modifier = Modifier.padding(bottom = 4.dp, start = 4.dp),
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = "${(stepFraction * 100).toInt()}%",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.primary,
-                    )
-                }
-
-                Spacer(Modifier.height(12.dp))
-
-                LinearProgressIndicator(
-                    progress = { stepFraction },
-                    color = colors.primary,
-                    trackColor = colors.surfaceVariant.copy(alpha = 0.6f),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(6.dp)
-                        .clip(RoundedCornerShape(3.dp)),
-                )
-            }
-        }
-
-        // Widget 4: Quick Toggles (Flashlight & Ringer mode)
+        // Widget 5: Quick Utilities (Flashlight & Ringer mode)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -503,38 +622,24 @@ fun WidgetsPage(
                 shape = RoundedCornerShape(20.dp),
                 color = if (isTorchOn) colors.primaryContainer else colors.surface.copy(alpha = 0.85f),
                 border = BorderStroke(1.dp, if (isTorchOn) colors.primary else palette.subtleBorder),
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(84.dp),
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.Start,
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .background(
-                                if (isTorchOn) colors.primary else colors.surfaceVariant.copy(alpha = 0.7f),
-                                CircleShape,
-                            ),
-                    ) {
-                        Text(
-                            text = if (isTorchOn) "☀" else "☼",
-                            fontSize = 18.sp,
-                            color = if (isTorchOn) colors.onPrimary else colors.onSurface,
-                        )
-                    }
-                    Spacer(Modifier.height(10.dp))
                     Text(
-                        text = "Flashlight",
-                        style = MaterialTheme.typography.labelMedium,
+                        text = if (isTorchOn) "🔦 Torch ON" else "🔦 Torch",
+                        style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
-                        color = colors.onSurface,
+                        color = if (isTorchOn) colors.onPrimaryContainer else colors.onSurface,
                     )
                     Text(
-                        text = if (isTorchOn) "On" else "Off",
+                        text = if (isTorchOn) "Tap to turn off" else "Tap to turn on",
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (isTorchOn) colors.primary else colors.onSurfaceVariant,
+                        color = colors.onSurfaceVariant,
                     )
                 }
             }
@@ -547,65 +652,52 @@ fun WidgetsPage(
                 shape = RoundedCornerShape(20.dp),
                 color = colors.surface.copy(alpha = 0.85f),
                 border = BorderStroke(1.dp, palette.subtleBorder),
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(84.dp),
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.Start,
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .background(colors.surfaceVariant.copy(alpha = 0.7f), CircleShape),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Notifications,
-                            contentDescription = "Ringer",
-                            tint = colors.onSurface,
-                            modifier = Modifier.size(18.dp),
-                        )
+                    val (modeLabel, iconStr) = when (ringerMode) {
+                        AudioManager.RINGER_MODE_NORMAL -> "Normal Ring" to "🔔"
+                        AudioManager.RINGER_MODE_VIBRATE -> "Vibrate" to "📳"
+                        else -> "Silent" to "🔕"
                     }
-                    Spacer(Modifier.height(10.dp))
                     Text(
-                        text = "Sound Mode",
-                        style = MaterialTheme.typography.labelMedium,
+                        text = "$iconStr $modeLabel",
+                        style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                         color = colors.onSurface,
                     )
-                    val ringerText = when (ringerMode) {
-                        AudioManager.RINGER_MODE_NORMAL -> "Normal"
-                        AudioManager.RINGER_MODE_VIBRATE -> "Vibrate"
-                        AudioManager.RINGER_MODE_SILENT -> "Silent"
-                        else -> "Sound"
-                    }
                     Text(
-                        text = ringerText,
+                        text = "Tap to cycle mode",
                         style = MaterialTheme.typography.labelSmall,
-                        color = colors.primary,
+                        color = colors.onSurfaceVariant,
                     )
                 }
             }
         }
 
-        // Widget 5: Daily Intention Scratchpad
+        // Widget 6: Daily Intention Scratchpad
         Surface(
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(22.dp),
             color = colors.surface.copy(alpha = 0.85f),
             border = BorderStroke(1.dp, palette.subtleBorder),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Column(modifier = Modifier.padding(18.dp)) {
+            Column(modifier = Modifier.padding(16.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "Daily Focus Intention",
+                        text = "Daily Intention",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = colors.onSurface,
+                        color = colors.onSurfaceVariant,
                     )
                     Icon(
                         imageVector = Icons.Default.Edit,
@@ -626,22 +718,23 @@ fun WidgetsPage(
                             dailyNote = it
                             QuickToolsHelper.saveDailyNote(context, it)
                         },
-                        placeholder = { Text("What is your primary focus for today?") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
+                        placeholder = { Text("What is your single most important goal today?") },
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        shape = RoundedCornerShape(14.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedContainerColor = colors.surface,
-                            unfocusedContainerColor = colors.surface,
+                            unfocusedContainerColor = colors.surface.copy(alpha = 0.7f),
                         ),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else {
                     Text(
-                        text = if (dailyNote.isNotBlank()) dailyNote else "Tap here or the pencil to set your mindful focus for today...",
+                        text = dailyNote.ifBlank { "Tap to write today's single most important intention..." },
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (dailyNote.isNotBlank()) colors.onSurface else colors.onSurfaceVariant.copy(alpha = 0.7f),
+                        color = if (dailyNote.isBlank()) colors.onSurfaceVariant.copy(alpha = 0.6f) else colors.onSurface,
                         modifier = Modifier
                             .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
                             .clickable { isEditingNote = true }
                             .padding(vertical = 4.dp),
                     )
@@ -649,6 +742,14 @@ fun WidgetsPage(
             }
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(24.dp))
+    }
+
+    if (showAddWidgetSheet) {
+        AddWidgetBottomSheet(
+            helper = appWidgetHelper,
+            onDismiss = { showAddWidgetSheet = false },
+            onWidgetAdded = { showAddWidgetSheet = false },
+        )
     }
 }

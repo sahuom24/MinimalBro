@@ -91,6 +91,42 @@ object AppIcons {
         }.build()
     }
 
+    val Widgets: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "Widgets",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f,
+        ).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(13f, 13f)
+                verticalLineToRelative(8f)
+                horizontalLineToRelative(8f)
+                verticalLineToRelative(-8f)
+                horizontalLineToRelative(-8f)
+                close()
+                moveTo(3f, 21f)
+                horizontalLineToRelative(8f)
+                verticalLineToRelative(-8f)
+                horizontalLineTo(3f)
+                verticalLineToRelative(8f)
+                close()
+                moveTo(3f, 3f)
+                verticalLineToRelative(8f)
+                horizontalLineToRelative(8f)
+                verticalLineTo(3f)
+                horizontalLineTo(3f)
+                close()
+                moveTo(16.66f, 1.69f)
+                lineTo(11.05f, 7.3f)
+                lineTo(16.66f, 12.91f)
+                lineTo(22.27f, 7.3f)
+                close()
+            }
+        }.build()
+    }
+
     val Tune: ImageVector by lazy {
         ImageVector.Builder(
             name = "Tune",

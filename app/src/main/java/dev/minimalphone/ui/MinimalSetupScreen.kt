@@ -46,6 +46,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.minimalphone.apps.LaunchableApp
 import dev.minimalphone.session.MinimalConstants
 import dev.minimalphone.session.MinimalRecord
@@ -53,11 +54,17 @@ import dev.minimalphone.session.MinimalSettings
 import dev.minimalphone.session.Wallpaper
 import dev.minimalphone.ui.theme.LocalMinimalPalette
 import dev.minimalphone.ui.theme.wallpaperSwatch
+import dev.minimalphone.ui.widgets.WidgetsPage
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import android.content.Intent
 
 enum class MinimalTab(val title: String) {
-    HOME("Minimal"),
+    HOME("Home"),
     APPS("Apps"),
-    TUNE("Style & Guard"),
+    WIDGETS("Widgets"),
+    TUNE("Guard"),
 }
 
 @Composable
@@ -94,6 +101,7 @@ fun MinimalSetupScreen(
 ) {
     val colors = MaterialTheme.colorScheme
     var selectedTab by remember { mutableStateOf(MinimalTab.HOME) }
+    var showCurateView by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -110,6 +118,7 @@ fun MinimalSetupScreen(
                 when (selectedTab) {
                     MinimalTab.HOME -> MinimalPlanTab(
                         settings = settings,
+                        apps = apps,
                         isDefaultHome = isDefaultHome,
                         justFinishedMinutes = justFinishedMinutes,
                         onDismissFinished = onDismissFinished,
@@ -119,20 +128,62 @@ fun MinimalSetupScreen(
                         onStartMinimal = onStartMinimal,
                     )
 
-                    MinimalTab.APPS -> AppsCurateTab(
-                        apps = apps,
-                        appsLoaded = appsLoaded,
-                        allowedPackages = settings.allowedPackages,
-                        favoritePackages = settings.favoritePackages,
-                        appTiers = settings.appTiers,
-                        onSetAppTier = onSetAppTier,
-                        onAutoClassifyAll = onAutoClassifyAll,
-                        onToggleAllowed = onToggleAllowed,
-                        onToggleFavorite = onToggleFavorite,
-                        onAllowEssentials = onAllowEssentials,
-                        onAllowAll = onAllowAll,
-                        onClearAllowed = onClearAllowed,
-                    )
+                    MinimalTab.APPS -> {
+                        if (showCurateView) {
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    androidx.compose.material3.TextButton(onClick = { showCurateView = false }) {
+                                        Text("← Back to Drawer")
+                                    }
+                                    Text(
+                                        text = "Focus Curation & Tiers",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = colors.onBackground,
+                                    )
+                                }
+                                AppsCurateTab(
+                                    apps = apps,
+                                    appsLoaded = appsLoaded,
+                                    allowedPackages = settings.allowedPackages,
+                                    favoritePackages = settings.favoritePackages,
+                                    appTiers = settings.appTiers,
+                                    onSetAppTier = onSetAppTier,
+                                    onAutoClassifyAll = onAutoClassifyAll,
+                                    onToggleAllowed = onToggleAllowed,
+                                    onToggleFavorite = onToggleFavorite,
+                                    onAllowEssentials = onAllowEssentials,
+                                    onAllowAll = onAllowAll,
+                                    onClearAllowed = onClearAllowed,
+                                )
+                            }
+                        } else {
+                            NormalAppDrawer(
+                                apps = apps,
+                                appsLoaded = appsLoaded,
+                                allowedPackages = settings.allowedPackages,
+                                favoritePackages = settings.favoritePackages,
+                                appTiers = settings.appTiers,
+                                onSetAppTier = onSetAppTier,
+                                onToggleFavorite = onToggleFavorite,
+                                onOpenCurateMode = { showCurateView = true },
+                            )
+                        }
+                    }
+
+                    MinimalTab.WIDGETS -> {
+                        WidgetsPage(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 20.dp, vertical = 14.dp),
+                        )
+                    }
 
                     MinimalTab.TUNE -> MinimalTuneTab(
                         settings = settings,
@@ -163,6 +214,7 @@ fun MinimalSetupScreen(
                     val icon = when (tab) {
                         MinimalTab.HOME -> AppIcons.HomeCalm
                         MinimalTab.APPS -> AppIcons.AppsDrawer
+                        MinimalTab.WIDGETS -> AppIcons.Widgets
                         MinimalTab.TUNE -> AppIcons.Tune
                     }
                     NavigationBarItem(
@@ -180,6 +232,7 @@ fun MinimalSetupScreen(
 @Composable
 private fun MinimalPlanTab(
     settings: MinimalSettings,
+    apps: List<LaunchableApp>,
     isDefaultHome: Boolean,
     justFinishedMinutes: Int?,
     onDismissFinished: () -> Unit,
@@ -188,8 +241,16 @@ private fun MinimalPlanTab(
     onOpenHomeSettings: () -> Unit,
     onStartMinimal: () -> Unit,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val colors = MaterialTheme.colorScheme
     val palette = LocalMinimalPalette.current
+
+    val clockText = remember { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()) }
+    val dateText = remember { SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(Date()) }
+
+    val favoriteAppObjects = remember(apps, settings.favoritePackages) {
+        apps.filter { it.packageName in settings.favoritePackages }
+    }
 
     Column(
         modifier = Modifier
@@ -201,34 +262,108 @@ private fun MinimalPlanTab(
                 .weight(1f)
                 .verticalScroll(rememberScrollState()),
         ) {
-            Row(
+            // Minimalist Bento Clock & Date Header
+            Surface(
+                shape = RoundedCornerShape(26.dp),
+                color = colors.surface,
+                border = BorderStroke(1.dp, palette.subtleBorder),
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "MinimalBro",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.onBackground,
-                    )
-                    Text(
-                        text = "Calm minimalist phone · Unlimited apps",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.onSurfaceVariant,
-                    )
-                }
-                Surface(
-                    shape = RoundedCornerShape(999.dp),
-                    color = colors.primaryContainer,
+                Row(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = if (isDefaultHome) "Default Home" else "Launcher Ready",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.onPrimaryContainer,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "MinimalBro",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.onBackground,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = clockText,
+                            style = androidx.compose.ui.text.TextStyle(
+                                color = colors.onSurface,
+                                fontSize = 42.sp,
+                                fontWeight = FontWeight.Light,
+                                fontFeatureSettings = "tnum",
+                            ),
+                        )
+                        Text(
+                            text = dateText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = colors.primaryContainer,
+                    ) {
+                        Text(
+                            text = if (isDefaultHome) "Default Home" else "Launcher Ready",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+
+            // Pinned Apps Quick Launch Bar (Home Shortcuts)
+            if (favoriteAppObjects.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = colors.surface.copy(alpha = 0.85f),
+                    border = BorderStroke(1.dp, palette.subtleBorder),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(
+                            text = "PINNED ON HOME",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            favoriteAppObjects.forEach { fav ->
+                                Surface(
+                                    onClick = {
+                                        val launchIntent = context.packageManager.getLaunchIntentForPackage(fav.packageName)
+                                        if (launchIntent != null) {
+                                            launchIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                            runCatching { context.startActivity(launchIntent) }
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(999.dp),
+                                    color = colors.primaryContainer.copy(alpha = 0.55f),
+                                    border = BorderStroke(1.dp, palette.subtleBorder),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        AppIcon(packageName = fav.packageName, size = 18.dp)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = fav.label,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = colors.onPrimaryContainer,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 

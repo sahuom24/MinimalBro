@@ -11,6 +11,10 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <uses-permission
+        android:name="android.permission.BIND_APPWIDGET"
+        xmlns:tools="http://schemas.android.com/tools"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"
         xmlns:tools="http://schemas.android.com/tools"
         tools:ignore="ProtectedPermissions" />
@@ -42,6 +46,9 @@
         </intent>
         <intent>
             <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+        <intent>
+            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
         </intent>
         <package android:name="com.android.settings" />
         <package android:name="com.google.android.dialer" />
