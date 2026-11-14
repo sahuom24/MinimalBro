@@ -46,10 +46,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.minimalphone.apps.LaunchableApp
+import dev.minimalphone.session.AppTier
+import dev.minimalphone.session.AppTierClassifier
 import dev.minimalphone.ui.theme.LocalMinimalPalette
 
 private enum class AppFilter(val label: String) {
     ALL("All"),
+    TIER_0("T0: Essentials"),
+    TIER_1("T1: Utility"),
+    TIER_2("T2: Dopamine"),
     ALLOWED("Allowed"),
     FAVORITES("Pinned"),
 }
@@ -60,6 +65,9 @@ fun AppsCurateTab(
     appsLoaded: Boolean,
     allowedPackages: Set<String>,
     favoritePackages: Set<String>,
+    appTiers: Map<String, AppTier> = emptyMap(),
+    onSetAppTier: (String, AppTier?) -> Unit = { _, _ -> },
+    onAutoClassifyAll: () -> Unit = {},
     onToggleAllowed: (String) -> Unit,
     onToggleFavorite: (String) -> Unit,
     onAllowEssentials: () -> Unit,
@@ -71,10 +79,14 @@ fun AppsCurateTab(
     var searchQuery by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(AppFilter.ALL) }
 
-    val filtered = remember(apps, searchQuery, filter, allowedPackages, favoritePackages) {
+    val filtered = remember(apps, searchQuery, filter, allowedPackages, favoritePackages, appTiers) {
         apps.filter { app ->
+            val tier = appTiers[app.packageName] ?: AppTierClassifier.suggestTier(app.packageName, app.label)
             val matchesFilter = when (filter) {
                 AppFilter.ALL -> true
+                AppFilter.TIER_0 -> app.packageName in allowedPackages && tier == AppTier.TIER_0
+                AppFilter.TIER_1 -> app.packageName in allowedPackages && tier == AppTier.TIER_1
+                AppFilter.TIER_2 -> app.packageName in allowedPackages && tier == AppTier.TIER_2
                 AppFilter.ALLOWED -> app.packageName in allowedPackages
                 AppFilter.FAVORITES -> app.packageName in favoritePackages
             }
@@ -138,6 +150,18 @@ fun AppsCurateTab(
             AppFilter.entries.forEach { entry ->
                 val countSuffix = when (entry) {
                     AppFilter.ALL -> ""
+                    AppFilter.TIER_0 -> {
+                        val count = allowedPackages.count { (appTiers[it] ?: AppTierClassifier.suggestTier(it)) == AppTier.TIER_0 }
+                        " ($count)"
+                    }
+                    AppFilter.TIER_1 -> {
+                        val count = allowedPackages.count { (appTiers[it] ?: AppTierClassifier.suggestTier(it)) == AppTier.TIER_1 }
+                        " ($count)"
+                    }
+                    AppFilter.TIER_2 -> {
+                        val count = allowedPackages.count { (appTiers[it] ?: AppTierClassifier.suggestTier(it)) == AppTier.TIER_2 }
+                        " ($count)"
+                    }
                     AppFilter.ALLOWED -> " (${allowedPackages.size})"
                     AppFilter.FAVORITES -> " (${favoritePackages.size})"
                 }
@@ -148,6 +172,7 @@ fun AppsCurateTab(
                     shape = RoundedCornerShape(999.dp),
                 )
             }
+            TextButton(onClick = onAutoClassifyAll) { Text("Auto-tier") }
             TextButton(onClick = onAllowEssentials) { Text("Essentials") }
             TextButton(onClick = onAllowAll) { Text("Allow all") }
             if (allowedPackages.isNotEmpty()) {
@@ -190,10 +215,11 @@ fun AppsCurateTab(
                     items(filtered, key = { it.packageName }) { app ->
                         val isAllowed = app.packageName in allowedPackages
                         val isFavorite = app.packageName in favoritePackages
+                        val currentTier = appTiers[app.packageName] ?: AppTierClassifier.suggestTier(app.packageName, app.label)
                         Surface(
                             shape = RoundedCornerShape(18.dp),
                             color = if (isAllowed) {
-                                colors.primaryContainer.copy(alpha = 0.42f)
+                                colors.primaryContainer.copy(alpha = 0.35f)
                             } else {
                                 colors.surface
                             },
@@ -204,7 +230,13 @@ fun AppsCurateTab(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(18.dp))
-                                .clickable { onToggleAllowed(app.packageName) },
+                                .clickable {
+                                    if (isAllowed) {
+                                        onSetAppTier(app.packageName, null)
+                                    } else {
+                                        onSetAppTier(app.packageName, currentTier)
+                                    }
+                                },
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -222,9 +254,19 @@ fun AppsCurateTab(
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                     Text(
-                                        text = if (isFavorite) "Pinned & allowed" else if (isAllowed) "Allowed on Home" else "Hidden",
+                                        text = if (!isAllowed) {
+                                            "Hidden · Default: ${currentTier.name}"
+                                        } else {
+                                            "${currentTier.title.takeWhile { it != ':' }} ${if (isFavorite) "· Pinned" else ""}"
+                                        },
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = if (isAllowed) colors.primary else colors.onSurfaceVariant,
+                                        color = if (isAllowed) {
+                                            when (currentTier) {
+                                                AppTier.TIER_0 -> colors.primary
+                                                AppTier.TIER_1 -> colors.secondary
+                                                AppTier.TIER_2 -> colors.error
+                                            }
+                                        } else colors.onSurfaceVariant,
                                     )
                                 }
                                 IconButton(onClick = { onToggleFavorite(app.packageName) }) {
@@ -235,21 +277,67 @@ fun AppsCurateTab(
                                         modifier = Modifier.size(20.dp),
                                     )
                                 }
-                                OutlinedButton(
-                                    onClick = { onToggleAllowed(app.packageName) },
-                                    shape = RoundedCornerShape(999.dp),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    if (isAllowed) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(14.dp),
+                                    Surface(
+                                        onClick = { onSetAppTier(app.packageName, AppTier.TIER_0) },
+                                        shape = RoundedCornerShape(999.dp),
+                                        color = if (isAllowed && currentTier == AppTier.TIER_0) colors.primary else colors.surfaceVariant.copy(alpha = 0.5f),
+                                        border = BorderStroke(1.dp, if (isAllowed && currentTier == AppTier.TIER_0) colors.primary else palette.subtleBorder),
+                                    ) {
+                                        Text(
+                                            text = "T0",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isAllowed && currentTier == AppTier.TIER_0) colors.onPrimary else colors.onSurfaceVariant,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                         )
-                                        Spacer(Modifier.width(4.dp))
-                                        Text("Keep", style = MaterialTheme.typography.labelSmall)
-                                    } else {
-                                        Text("Add", style = MaterialTheme.typography.labelSmall)
+                                    }
+
+                                    Surface(
+                                        onClick = { onSetAppTier(app.packageName, AppTier.TIER_1) },
+                                        shape = RoundedCornerShape(999.dp),
+                                        color = if (isAllowed && currentTier == AppTier.TIER_1) colors.secondary else colors.surfaceVariant.copy(alpha = 0.5f),
+                                        border = BorderStroke(1.dp, if (isAllowed && currentTier == AppTier.TIER_1) colors.secondary else palette.subtleBorder),
+                                    ) {
+                                        Text(
+                                            text = "T1",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isAllowed && currentTier == AppTier.TIER_1) colors.onSecondary else colors.onSurfaceVariant,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        )
+                                    }
+
+                                    Surface(
+                                        onClick = { onSetAppTier(app.packageName, AppTier.TIER_2) },
+                                        shape = RoundedCornerShape(999.dp),
+                                        color = if (isAllowed && currentTier == AppTier.TIER_2) colors.error else colors.surfaceVariant.copy(alpha = 0.5f),
+                                        border = BorderStroke(1.dp, if (isAllowed && currentTier == AppTier.TIER_2) colors.error else palette.subtleBorder),
+                                    ) {
+                                        Text(
+                                            text = "T2",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isAllowed && currentTier == AppTier.TIER_2) colors.onError else colors.onSurfaceVariant,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        )
+                                    }
+
+                                    if (isAllowed) {
+                                        IconButton(
+                                            onClick = { onSetAppTier(app.packageName, null) },
+                                            modifier = Modifier.size(28.dp),
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Hide",
+                                                tint = colors.onSurfaceVariant,
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                        }
                                     }
                                 }
                             }

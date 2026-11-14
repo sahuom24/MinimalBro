@@ -8,8 +8,11 @@ import androidx.lifecycle.viewModelScope
 import dev.minimalphone.apps.AppCatalog
 import dev.minimalphone.apps.DefaultCommunicationApps
 import dev.minimalphone.apps.LaunchableApp
+import dev.minimalphone.blocker.GrayscaleController
 import dev.minimalphone.blocker.MinimalAccessibilityService
 import dev.minimalphone.session.ActiveMinimalSession
+import dev.minimalphone.session.AppTier
+import dev.minimalphone.session.AppTierClassifier
 import dev.minimalphone.session.Interruptions
 import dev.minimalphone.session.MinimalConstants
 import dev.minimalphone.session.MinimalRecord
@@ -47,6 +50,9 @@ class MinimalViewModel(application: Application) : AndroidViewModel(application)
     private val _notificationsEnabled = MutableStateFlow(true)
     val notificationsEnabled: StateFlow<Boolean> = _notificationsEnabled.asStateFlow()
 
+    private val _writeSecureSettingsGranted = MutableStateFlow(false)
+    val writeSecureSettingsGranted: StateFlow<Boolean> = _writeSecureSettingsGranted.asStateFlow()
+
     private val _justFinishedMinutes = MutableStateFlow<Int?>(null)
     val justFinishedMinutes: StateFlow<Int?> = _justFinishedMinutes.asStateFlow()
 
@@ -68,6 +74,7 @@ class MinimalViewModel(application: Application) : AndroidViewModel(application)
         _accessibilityAccess.value = MinimalAccessibilityService.isServiceEnabled(context)
         _dndAccess.value = Interruptions.hasAccess(context)
         _notificationsEnabled.value = Interruptions.notificationsAllowed(context)
+        _writeSecureSettingsGranted.value = GrayscaleController.hasPermission(context)
         _isDefaultHome.value = checkDefaultHome(context)
     }
 
@@ -108,6 +115,22 @@ class MinimalViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun toggleAllowed(packageName: String) = repository.toggleAllowed(packageName)
+
+    fun setAppTier(packageName: String, tier: AppTier?) = repository.setAppTier(packageName, tier)
+
+    fun autoClassifyAll() {
+        val classified: Map<String, AppTier> = _apps.value.associate { app ->
+            app.packageName to AppTierClassifier.suggestTier(app.packageName, app.label)
+        }
+        repository.updateSettings { current ->
+            current.copy(
+                allowedPackages = classified.keys,
+                appTiers = classified,
+            )
+        }
+    }
+
+    fun setEnableGrayscale(enabled: Boolean) = repository.updateSettings { it.copy(enableGrayscale = enabled) }
 
     fun toggleFavorite(packageName: String) = repository.toggleFavorite(packageName)
 

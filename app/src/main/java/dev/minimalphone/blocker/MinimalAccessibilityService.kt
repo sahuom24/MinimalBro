@@ -16,6 +16,9 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import dev.minimalphone.apps.DefaultCommunicationApps
+import dev.minimalphone.session.AppTier
+import dev.minimalphone.session.AppTierClassifier
+import dev.minimalphone.session.MicroSessionManager
 import dev.minimalphone.session.MinimalRepository
 import dev.minimalphone.ui.MainActivity
 
@@ -28,6 +31,8 @@ class MinimalAccessibilityService : AccessibilityService() {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var lastToastTime = 0L
+    private var currentForegroundApp: String? = null
+    private var sessionCountdownRunnable: Runnable? = null
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -45,6 +50,9 @@ class MinimalAccessibilityService : AccessibilityService() {
         if (activeInstance == this) {
             activeInstance = null
         }
+        sessionCountdownRunnable?.let { mainHandler.removeCallbacks(it) }
+        sessionCountdownRunnable = null
+        GrayscaleController.setGrayscale(this, false)
         super.onDestroy()
     }
 
@@ -57,7 +65,14 @@ class MinimalAccessibilityService : AccessibilityService() {
         repository.syncWithClock()
         val active = repository.active.value ?: return
 
-        if (packageName == applicationContext.packageName) return
+        if (packageName == applicationContext.packageName) {
+            // User returned to MinimalBro Home screen
+            currentForegroundApp = null
+            sessionCountdownRunnable?.let { mainHandler.removeCallbacks(it) }
+            sessionCountdownRunnable = null
+            GrayscaleController.setGrayscale(this, false)
+            return
+        }
         if (packageName in SYSTEM_PACKAGES) return
         if (isBiometricOrSecurity(packageName, className)) return
         if (isInputMethod(packageName)) return
@@ -66,7 +81,10 @@ class MinimalAccessibilityService : AccessibilityService() {
 
         if (isAllowedGameLauncherBridge(packageName, className, active.allowedPackages)) return
 
-        if (packageName in active.allowedPackages) return
+        if (packageName in active.allowedPackages) {
+            handleAllowedPackageInSession(packageName, active)
+            return
+        }
 
         // Redirect non-minimal default launchers back to MinimalBro during active sessions
         if (isOtherLauncherPackage(packageName)) {
@@ -79,6 +97,104 @@ class MinimalAccessibilityService : AccessibilityService() {
         }
 
         blockApp(packageName)
+    }
+
+    private fun handleAllowedPackageInSession(
+        packageName: String,
+        active: dev.minimalphone.session.ActiveMinimalSession,
+    ) {
+        // 1. Check if the app is currently in a 60-second cooldown
+        if (MicroSessionManager.isInCooldown(packageName)) {
+            val remainingSecs = MicroSessionManager.getRemainingCooldownSeconds(packageName)
+            blockCooldownApp(packageName, remainingSecs)
+            return
+        }
+
+        val tier = active.appTiers[packageName] ?: AppTierClassifier.suggestTier(packageName)
+
+        // Tier 0: Essentials - unlimited access, zero friction, normal display
+        if (tier == AppTier.TIER_0) {
+            currentForegroundApp = packageName
+            sessionCountdownRunnable?.let { mainHandler.removeCallbacks(it) }
+            sessionCountdownRunnable = null
+            GrayscaleController.setGrayscale(this, false)
+            return
+        }
+
+        // Tier 1 & Tier 2:
+        // Native Grayscale Toggle: Force monochrome for Tier 2 dopamine traps (or Chrome)
+        if (active.enableGrayscale && (tier == AppTier.TIER_2 || packageName == "com.android.chrome")) {
+            GrayscaleController.setGrayscale(this, true)
+        } else {
+            GrayscaleController.setGrayscale(this, false)
+        }
+
+        // Micro-Session Monitoring: 5-minute session countdown
+        val session = MicroSessionManager.startOrGetSession(packageName)
+        if (session == null) {
+            blockCooldownApp(packageName, MicroSessionManager.getRemainingCooldownSeconds(packageName))
+            return
+        }
+
+        currentForegroundApp = packageName
+        sessionCountdownRunnable?.let { mainHandler.removeCallbacks(it) }
+
+        val remainingMs = MicroSessionManager.getRemainingSessionMs(packageName)
+        if (remainingMs <= 0) {
+            triggerSessionExpired(packageName)
+            return
+        }
+
+        val runnable = Runnable {
+            if (currentForegroundApp == packageName) {
+                triggerSessionExpired(packageName)
+            }
+        }
+        sessionCountdownRunnable = runnable
+        mainHandler.postDelayed(runnable, remainingMs)
+    }
+
+    private fun triggerSessionExpired(packageName: String) {
+        MicroSessionManager.expireSession(packageName)
+        GrayscaleController.setGrayscale(this, false)
+        sessionCountdownRunnable?.let { mainHandler.removeCallbacks(it) }
+        sessionCountdownRunnable = null
+        currentForegroundApp = null
+
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+            putExtra(EXTRA_SESSION_EXPIRED_PACKAGE, packageName)
+        }
+        runCatching { startActivity(intent) }
+    }
+
+    private fun blockCooldownApp(packageName: String, remainingSecs: Int) {
+        GrayscaleController.setGrayscale(this, false)
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+            putExtra(EXTRA_COOLDOWN_PACKAGE, packageName)
+            putExtra(EXTRA_COOLDOWN_REMAINING_SECS, remainingSecs)
+        }
+        runCatching { startActivity(intent) }
+
+        val now = System.currentTimeMillis()
+        if (now - lastToastTime > TOAST_INTERVAL_MS) {
+            lastToastTime = now
+            val label = getAppLabel(packageName)
+            mainHandler.post {
+                Toast.makeText(
+                    applicationContext,
+                    "$label is in a 60-second cooldown (${remainingSecs}s left). Take a breath.",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
     }
 
     private fun bringMinimalHomeToFront() {
@@ -244,6 +360,9 @@ class MinimalAccessibilityService : AccessibilityService() {
 
     companion object {
         const val EXTRA_BLOCKED_PACKAGE = "dev.minimalphone.extra.BLOCKED_PACKAGE"
+        const val EXTRA_SESSION_EXPIRED_PACKAGE = "dev.minimalphone.extra.SESSION_EXPIRED_PACKAGE"
+        const val EXTRA_COOLDOWN_PACKAGE = "dev.minimalphone.extra.COOLDOWN_PACKAGE"
+        const val EXTRA_COOLDOWN_REMAINING_SECS = "dev.minimalphone.extra.COOLDOWN_REMAINING_SECS"
         private const val TOAST_INTERVAL_MS = 2000L
         private const val GAME_BRIDGE_GRACE_MS = 3500L
 

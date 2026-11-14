@@ -74,6 +74,10 @@ fun MinimalSetupScreen(
     onDismissFinished: () -> Unit,
     onStartMinimal: () -> Unit,
     onCommitmentHours: (Int) -> Unit,
+    onSetAppTier: (String, dev.minimalphone.session.AppTier?) -> Unit = { _, _ -> },
+    onAutoClassifyAll: () -> Unit = {},
+    onEnableGrayscale: (Boolean) -> Unit = {},
+    writeSecureSettingsGranted: Boolean = false,
     onToggleAllowed: (String) -> Unit,
     onToggleFavorite: (String) -> Unit,
     onAllowEssentials: () -> Unit,
@@ -120,6 +124,9 @@ fun MinimalSetupScreen(
                         appsLoaded = appsLoaded,
                         allowedPackages = settings.allowedPackages,
                         favoritePackages = settings.favoritePackages,
+                        appTiers = settings.appTiers,
+                        onSetAppTier = onSetAppTier,
+                        onAutoClassifyAll = onAutoClassifyAll,
                         onToggleAllowed = onToggleAllowed,
                         onToggleFavorite = onToggleFavorite,
                         onAllowEssentials = onAllowEssentials,
@@ -134,6 +141,8 @@ fun MinimalSetupScreen(
                         accessibilityAccess = accessibilityAccess,
                         dndAccess = dndAccess,
                         notificationsEnabled = notificationsEnabled,
+                        writeSecureSettingsGranted = writeSecureSettingsGranted,
+                        onEnableGrayscale = onEnableGrayscale,
                         onShowAppIcons = onShowAppIcons,
                         onPauseInterruptions = onPauseInterruptions,
                         onRequireUnlock = onRequireUnlock,
@@ -454,6 +463,8 @@ private fun MinimalTuneTab(
     accessibilityAccess: Boolean,
     dndAccess: Boolean,
     notificationsEnabled: Boolean,
+    writeSecureSettingsGranted: Boolean = false,
+    onEnableGrayscale: (Boolean) -> Unit = {},
     onShowAppIcons: (Boolean) -> Unit,
     onPauseInterruptions: (Boolean) -> Unit,
     onRequireUnlock: (Boolean) -> Unit,
@@ -594,6 +605,55 @@ private fun MinimalTuneTab(
                     checked = settings.requireUnlockToEnd,
                     onCheckedChange = onRequireUnlock,
                 )
+                TuneRow(
+                    title = "Monochrome on dopamine traps",
+                    subtitle = if (writeSecureSettingsGranted) {
+                        "Active: automatically switches to grayscale on Tier 2 apps (and Chrome)."
+                    } else {
+                        "Switches display to grayscale on dopamine apps (requires one-time ADB command)."
+                    },
+                    checked = settings.enableGrayscale,
+                    onCheckedChange = onEnableGrayscale,
+                )
+            }
+        }
+
+        if (!writeSecureSettingsGranted) {
+            Spacer(Modifier.height(10.dp))
+            Card(
+                colors = CardDefaults.cardColors(containerColor = colors.surfaceVariant.copy(alpha = 0.5f)),
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "Native Grayscale Setup (Optional)",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.onSurface,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "Grayscale eliminates 80% of dopamine from Reels and shopping feeds. To enable automatic hardware monochrome toggle, run this one-time ADB command from your PC:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = colors.surface,
+                        border = BorderStroke(1.dp, palette.subtleBorder),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = "adb shell pm grant com.focusbro.minimal android.permission.WRITE_SECURE_SETTINGS",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            color = colors.primary,
+                            modifier = Modifier.padding(8.dp),
+                        )
+                    }
+                }
             }
         }
 

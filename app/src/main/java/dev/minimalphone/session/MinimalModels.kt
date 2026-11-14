@@ -17,16 +17,25 @@ enum class Wallpaper(val title: String) {
     NIGHT("Espresso"),
 }
 
+/** Intent-based tiered app classification to break the unconscious doom-scrolling loop. */
+enum class AppTier(val level: Int, val title: String, val subtitle: String) {
+    TIER_0(0, "Tier 0 (Essentials)", "UPI, Phone, Camera, Maps, Uber · Unlimited access"),
+    TIER_1(1, "Tier 1 (Utility with Limits)", "Amazon, Myntra, Swiggy, Chrome · 5m session & 60s cooldown"),
+    TIER_2(2, "Tier 2 (Dopamine Traps)", "Instagram, Reddit, YouTube · Speed bump & monochrome"),
+}
+
 /** User preferences for MinimalBro. Zero app count caps: keep as many essentials as needed. */
 data class MinimalSettings(
     /** 0 = Ongoing (permanent minimal phone until exited), otherwise hours up to 90 days. */
     val commitmentHours: Int = 0,
     val allowedPackages: Set<String> = emptySet(),
     val favoritePackages: Set<String> = emptySet(),
+    val appTiers: Map<String, AppTier> = emptyMap(),
     val showAppIcons: Boolean = false,
     val pauseInterruptions: Boolean = false,
     val requireUnlockToEnd: Boolean = false,
     val wallpaper: Wallpaper = Wallpaper.PAPER,
+    val enableGrayscale: Boolean = true,
 )
 
 /** An active minimal phone detox session, derived from wall-clock timestamps. */
@@ -35,6 +44,8 @@ data class ActiveMinimalSession(
     val endsAtMillis: Long,
     val isIndefinite: Boolean,
     val allowedPackages: Set<String>,
+    val appTiers: Map<String, AppTier> = emptyMap(),
+    val enableGrayscale: Boolean = true,
     val requireUnlockToEnd: Boolean,
     val interruptionsPaused: Boolean,
 ) {

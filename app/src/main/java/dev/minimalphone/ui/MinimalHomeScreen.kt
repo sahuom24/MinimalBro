@@ -62,6 +62,9 @@ import dev.minimalphone.apps.DefaultCommunicationApps
 import dev.minimalphone.apps.LaunchableApp
 import dev.minimalphone.blocker.MinimalAccessibilityService
 import dev.minimalphone.session.ActiveMinimalSession
+import dev.minimalphone.session.AppTier
+import dev.minimalphone.session.AppTierClassifier
+import dev.minimalphone.session.MicroSessionManager
 import dev.minimalphone.session.Wallpaper
 import dev.minimalphone.ui.theme.LocalMinimalPalette
 import dev.minimalphone.ui.theme.wallpaperBrush
@@ -90,6 +93,22 @@ fun MinimalHomeScreen(
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var searchQuery by remember { mutableStateOf("") }
     var holdProgress by remember { mutableFloatStateOf(0f) }
+    var speedBumpTarget by remember { mutableStateOf<Pair<LaunchableApp, AppTier>?>(null) }
+    var cooldownTarget by remember { mutableStateOf<Pair<LaunchableApp, Int>?>(null) }
+
+    val handleAppClick: (LaunchableApp) -> Unit = { app ->
+        if (MicroSessionManager.isInCooldown(app.packageName)) {
+            val remaining = MicroSessionManager.getRemainingCooldownSeconds(app.packageName)
+            cooldownTarget = app to remaining
+        } else {
+            val tier = active.appTiers[app.packageName] ?: AppTierClassifier.suggestTier(app.packageName, app.label)
+            if (tier == AppTier.TIER_0) {
+                launchMinimalApp(context, app.packageName)
+            } else {
+                speedBumpTarget = app to tier
+            }
+        }
+    }
 
     LaunchedEffect(active.endsAtMillis, active.isIndefinite) {
         while (true) {
@@ -218,7 +237,7 @@ fun MinimalHomeScreen(
                 ) {
                     favoriteApps.forEach { fav ->
                         Surface(
-                            onClick = { launchMinimalApp(context, fav.packageName) },
+                            onClick = { handleAppClick(fav) },
                             shape = RoundedCornerShape(999.dp),
                             color = colors.primaryContainer.copy(alpha = 0.65f),
                             border = BorderStroke(1.dp, palette.subtleBorder),
@@ -309,22 +328,28 @@ fun MinimalHomeScreen(
                     }
                 } else {
                     items(filteredApps, key = { it.packageName }) { app ->
+                        val appTier = active.appTiers[app.packageName] ?: AppTierClassifier.suggestTier(app.packageName, app.label)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(16.dp))
-                                .clickable { launchMinimalApp(context, app.packageName) }
+                                .clickable { handleAppClick(app) }
                                 .padding(horizontal = 10.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             if (showAppIcons) {
                                 AppIcon(packageName = app.packageName, size = 28.dp)
                             } else {
+                                val dotColor = when (appTier) {
+                                    AppTier.TIER_0 -> colors.primary.copy(alpha = 0.65f)
+                                    AppTier.TIER_1 -> colors.secondary.copy(alpha = 0.85f)
+                                    AppTier.TIER_2 -> colors.error.copy(alpha = 0.75f)
+                                }
                                 Box(
                                     modifier = Modifier
                                         .size(7.dp)
                                         .clip(CircleShape)
-                                        .background(colors.primary.copy(alpha = 0.65f)),
+                                        .background(dotColor),
                                 )
                             }
                             Spacer(Modifier.width(14.dp))
@@ -335,7 +360,23 @@ fun MinimalHomeScreen(
                                 color = colors.onBackground,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
                             )
+                            if (appTier == AppTier.TIER_1) {
+                                Text(
+                                    text = "5m",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.onSurfaceVariant.copy(alpha = 0.6f),
+                                    modifier = Modifier.padding(horizontal = 6.dp),
+                                )
+                            } else if (appTier == AppTier.TIER_2) {
+                                Text(
+                                    text = "Trap",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.error.copy(alpha = 0.7f),
+                                    modifier = Modifier.padding(horizontal = 6.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -428,6 +469,27 @@ fun MinimalHomeScreen(
                     }
                 }
             }
+        }
+
+        speedBumpTarget?.let { (app, tier) ->
+            IntentionSpeedBumpDialog(
+                app = app,
+                tier = tier,
+                onDismiss = { speedBumpTarget = null },
+                onProceed = { _ ->
+                    speedBumpTarget = null
+                    launchMinimalApp(context, app.packageName)
+                },
+            )
+        }
+
+        cooldownTarget?.let { (app, remainingSecs) ->
+            SessionEndedOverlay(
+                packageName = app.packageName,
+                appLabel = app.label,
+                initialCooldownSecs = remainingSecs,
+                onDismiss = { cooldownTarget = null },
+            )
         }
     }
 }

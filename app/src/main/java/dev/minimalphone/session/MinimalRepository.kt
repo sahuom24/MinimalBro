@@ -3,6 +3,7 @@ package dev.minimalphone.session
 import android.content.Context
 import android.content.SharedPreferences
 import dev.minimalphone.apps.DefaultCommunicationApps
+import dev.minimalphone.blocker.GrayscaleController
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,15 +29,40 @@ class MinimalRepository private constructor(context: Context) {
     fun updateSettings(transform: (MinimalSettings) -> MinimalSettings) {
         val updated = transform(_settings.value)
         _settings.value = updated
+        val tiersJson = JSONObject().apply {
+            updated.appTiers.forEach { (pkg, tier) ->
+                put(pkg, tier.name)
+            }
+        }.toString()
+
         prefs.edit()
             .putInt(KEY_HOURS, updated.commitmentHours)
             .putStringSet(KEY_ALLOWED, updated.allowedPackages)
             .putStringSet(KEY_FAVORITES, updated.favoritePackages)
+            .putString(KEY_APP_TIERS, tiersJson)
+            .putBoolean(KEY_ENABLE_GRAYSCALE, updated.enableGrayscale)
             .putBoolean(KEY_SHOW_ICONS, updated.showAppIcons)
             .putBoolean(KEY_PAUSE, updated.pauseInterruptions)
             .putBoolean(KEY_UNLOCK, updated.requireUnlockToEnd)
             .putString(KEY_WALLPAPER, updated.wallpaper.name)
             .apply()
+    }
+
+    fun setAppTier(packageName: String, tier: AppTier?) {
+        updateSettings { current ->
+            if (tier != null) {
+                current.copy(
+                    allowedPackages = current.allowedPackages + packageName,
+                    appTiers = current.appTiers + (packageName to tier),
+                )
+            } else {
+                current.copy(
+                    allowedPackages = current.allowedPackages - packageName,
+                    favoritePackages = current.favoritePackages - packageName,
+                    appTiers = current.appTiers - packageName,
+                )
+            }
+        }
     }
 
     fun toggleAllowed(packageName: String) {
@@ -52,7 +78,12 @@ class MinimalRepository private constructor(context: Context) {
             } else {
                 current.favoritePackages
             }
-            current.copy(allowedPackages = nextAllowed, favoritePackages = nextFavorites)
+            val nextTiers = if (removing) {
+                current.appTiers - packageName
+            } else {
+                current.appTiers + (packageName to (current.appTiers[packageName] ?: AppTierClassifier.suggestTier(packageName)))
+            }
+            current.copy(allowedPackages = nextAllowed, favoritePackages = nextFavorites, appTiers = nextTiers)
         }
     }
 
@@ -106,6 +137,8 @@ class MinimalRepository private constructor(context: Context) {
             endsAtMillis = endsAt,
             isIndefinite = indefinite,
             allowedPackages = allowedWithComm,
+            appTiers = settings.appTiers,
+            enableGrayscale = settings.enableGrayscale,
             requireUnlockToEnd = settings.requireUnlockToEnd,
             interruptionsPaused = paused,
         )
@@ -136,6 +169,8 @@ class MinimalRepository private constructor(context: Context) {
         }
 
         if (active.interruptionsPaused) Interruptions.resume(appContext)
+        GrayscaleController.setGrayscale(appContext, false)
+        MicroSessionManager.clearAll()
         MinimalAlarms.cancel(appContext)
         MinimalNotifier.clearOngoing(appContext)
         if (completed) MinimalNotifier.showComplete(appContext, minutes)
@@ -190,14 +225,18 @@ class MinimalRepository private constructor(context: Context) {
             DefaultCommunicationApps.resolveDefaultMinimalPackages(appContext).take(3).toSet()
         }
 
+        val appTiers = parseTiersJson(prefs.getString(KEY_APP_TIERS, null))
+
         return MinimalSettings(
             commitmentHours = prefs.getInt(KEY_HOURS, 0).coerceIn(0, MinimalConstants.MAX_TIMED_HOURS),
             allowedPackages = allowed,
             favoritePackages = favorites,
+            appTiers = appTiers,
             showAppIcons = prefs.getBoolean(KEY_SHOW_ICONS, false),
             pauseInterruptions = prefs.getBoolean(KEY_PAUSE, false),
             requireUnlockToEnd = prefs.getBoolean(KEY_UNLOCK, false),
             wallpaper = wallpaper,
+            enableGrayscale = prefs.getBoolean(KEY_ENABLE_GRAYSCALE, true),
         )
     }
 
@@ -210,6 +249,8 @@ class MinimalRepository private constructor(context: Context) {
             endsAtMillis = ends,
             isIndefinite = prefs.getBoolean(KEY_INDEFINITE, false),
             allowedPackages = prefs.getStringSet(KEY_SESSION_ALLOWED, emptySet()).orEmpty().toSet(),
+            appTiers = parseTiersJson(prefs.getString(KEY_SESSION_TIERS, null)),
+            enableGrayscale = prefs.getBoolean(KEY_SESSION_GRAYSCALE, true),
             requireUnlockToEnd = prefs.getBoolean(KEY_SESSION_UNLOCK, false),
             interruptionsPaused = prefs.getBoolean(KEY_SESSION_PAUSED, false),
         )
@@ -223,18 +264,43 @@ class MinimalRepository private constructor(context: Context) {
                 .remove(KEY_ENDS_AT)
                 .remove(KEY_INDEFINITE)
                 .remove(KEY_SESSION_ALLOWED)
+                .remove(KEY_SESSION_TIERS)
+                .remove(KEY_SESSION_GRAYSCALE)
                 .remove(KEY_SESSION_UNLOCK)
                 .remove(KEY_SESSION_PAUSED)
         } else {
+            val tiersJson = JSONObject().apply {
+                session.appTiers.forEach { (pkg, tier) ->
+                    put(pkg, tier.name)
+                }
+            }.toString()
+
             editor
                 .putLong(KEY_STARTED_AT, session.startedAtMillis)
                 .putLong(KEY_ENDS_AT, session.endsAtMillis)
                 .putBoolean(KEY_INDEFINITE, session.isIndefinite)
                 .putStringSet(KEY_SESSION_ALLOWED, session.allowedPackages)
+                .putString(KEY_SESSION_TIERS, tiersJson)
+                .putBoolean(KEY_SESSION_GRAYSCALE, session.enableGrayscale)
                 .putBoolean(KEY_SESSION_UNLOCK, session.requireUnlockToEnd)
                 .putBoolean(KEY_SESSION_PAUSED, session.interruptionsPaused)
         }
         editor.apply()
+    }
+
+    private fun parseTiersJson(raw: String?): Map<String, AppTier> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        return runCatching {
+            val obj = JSONObject(raw)
+            buildMap {
+                obj.keys().forEach { pkg ->
+                    runCatching {
+                        val tierName = obj.getString(pkg)
+                        put(pkg, AppTier.valueOf(tierName))
+                    }
+                }
+            }
+        }.getOrDefault(emptyMap())
     }
 
     private fun readHistory(): List<MinimalRecord> {
@@ -277,6 +343,8 @@ class MinimalRepository private constructor(context: Context) {
         private const val KEY_HOURS = "commitment_hours"
         private const val KEY_ALLOWED = "allowed_packages"
         private const val KEY_FAVORITES = "favorite_packages"
+        private const val KEY_APP_TIERS = "app_tiers"
+        private const val KEY_ENABLE_GRAYSCALE = "enable_grayscale"
         private const val KEY_SHOW_ICONS = "show_app_icons"
         private const val KEY_PAUSE = "pause_interruptions"
         private const val KEY_UNLOCK = "require_unlock"
@@ -286,6 +354,8 @@ class MinimalRepository private constructor(context: Context) {
         private const val KEY_ENDS_AT = "session_ends_at"
         private const val KEY_INDEFINITE = "session_indefinite"
         private const val KEY_SESSION_ALLOWED = "session_allowed"
+        private const val KEY_SESSION_TIERS = "session_tiers"
+        private const val KEY_SESSION_GRAYSCALE = "session_grayscale"
         private const val KEY_SESSION_UNLOCK = "session_unlock"
         private const val KEY_SESSION_PAUSED = "session_paused"
 
@@ -300,7 +370,10 @@ class MinimalRepository private constructor(context: Context) {
 
         @androidx.annotation.VisibleForTesting
         internal fun resetForTests() {
-            synchronized(this) { instance = null }
+            synchronized(this) {
+                instance = null
+                MicroSessionManager.clearAll()
+            }
         }
     }
 }

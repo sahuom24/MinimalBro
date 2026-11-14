@@ -6,6 +6,10 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        xmlns:tools="http://schemas.android.com/tools"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- Narrow launcher & essential utility queries (no QUERY_ALL_PACKAGES). -->
     <queries>

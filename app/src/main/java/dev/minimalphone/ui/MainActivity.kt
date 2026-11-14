@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.minimalphone.blocker.MinimalAccessibilityService
 import dev.minimalphone.session.Interruptions
 import dev.minimalphone.session.MinimalNotifier
 import dev.minimalphone.ui.theme.MinimalBroTheme
@@ -33,16 +34,43 @@ import dev.minimalphone.ui.theme.MinimalBroTheme
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MinimalViewModel by viewModels()
+    private var sessionExpiredPackage by mutableStateOf<String?>(null)
+    private var cooldownPackageInfo by mutableStateOf<Pair<String, Int>?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         MinimalNotifier.ensureChannels(this)
+        handleIncomingIntent(intent)
         setContent {
             val settings by viewModel.settings.collectAsStateWithLifecycle()
             MinimalBroTheme(wallpaper = settings.wallpaper) {
-                MinimalBroApp(viewModel)
+                MinimalBroApp(
+                    viewModel = viewModel,
+                    sessionExpiredPackage = sessionExpiredPackage,
+                    cooldownPackageInfo = cooldownPackageInfo,
+                    onDismissSessionExpired = { sessionExpiredPackage = null },
+                    onDismissCooldown = { cooldownPackageInfo = null },
+                )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    private fun handleIncomingIntent(intent: Intent?) {
+        val expired = intent?.getStringExtra(MinimalAccessibilityService.EXTRA_SESSION_EXPIRED_PACKAGE)
+        if (!expired.isNullOrBlank()) {
+            sessionExpiredPackage = expired
+        }
+        val cooldown = intent?.getStringExtra(MinimalAccessibilityService.EXTRA_COOLDOWN_PACKAGE)
+        val remaining = intent?.getIntExtra(MinimalAccessibilityService.EXTRA_COOLDOWN_REMAINING_SECS, 60) ?: 60
+        if (!cooldown.isNullOrBlank()) {
+            cooldownPackageInfo = cooldown to remaining
         }
     }
 
@@ -53,7 +81,13 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MinimalBroApp(viewModel: MinimalViewModel) {
+fun MinimalBroApp(
+    viewModel: MinimalViewModel,
+    sessionExpiredPackage: String? = null,
+    cooldownPackageInfo: Pair<String, Int>? = null,
+    onDismissSessionExpired: () -> Unit = {},
+    onDismissCooldown: () -> Unit = {},
+) {
     val context = LocalContext.current
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val active by viewModel.active.collectAsStateWithLifecycle()
@@ -64,6 +98,7 @@ fun MinimalBroApp(viewModel: MinimalViewModel) {
     val accessibilityAccess by viewModel.accessibilityAccess.collectAsStateWithLifecycle()
     val dndAccess by viewModel.dndAccess.collectAsStateWithLifecycle()
     val notificationsEnabled by viewModel.notificationsEnabled.collectAsStateWithLifecycle()
+    val writeSecureSettingsGranted by viewModel.writeSecureSettingsGranted.collectAsStateWithLifecycle()
     val justFinished by viewModel.justFinishedMinutes.collectAsStateWithLifecycle()
 
     var showDndExplain by remember { mutableStateOf(false) }
@@ -166,6 +201,10 @@ fun MinimalBroApp(viewModel: MinimalViewModel) {
                 viewModel.startMinimal()
             },
             onCommitmentHours = viewModel::setCommitmentHours,
+            onSetAppTier = viewModel::setAppTier,
+            onAutoClassifyAll = viewModel::autoClassifyAll,
+            onEnableGrayscale = viewModel::setEnableGrayscale,
+            writeSecureSettingsGranted = writeSecureSettingsGranted,
             onToggleAllowed = viewModel::toggleAllowed,
             onToggleFavorite = viewModel::toggleFavorite,
             onAllowEssentials = viewModel::allowEssentialsPreset,
@@ -238,6 +277,26 @@ fun MinimalBroApp(viewModel: MinimalViewModel) {
             dismissButton = {
                 TextButton(onClick = { showAccessibilityExplain = false }) { Text("Not now") }
             },
+        )
+    }
+
+    sessionExpiredPackage?.let { pkg ->
+        val appLabel = apps.firstOrNull { it.packageName == pkg }?.label ?: "This app"
+        SessionEndedOverlay(
+            packageName = pkg,
+            appLabel = appLabel,
+            initialCooldownSecs = 60,
+            onDismiss = onDismissSessionExpired,
+        )
+    }
+
+    cooldownPackageInfo?.let { (pkg, remaining) ->
+        val appLabel = apps.firstOrNull { it.packageName == pkg }?.label ?: "This app"
+        SessionEndedOverlay(
+            packageName = pkg,
+            appLabel = appLabel,
+            initialCooldownSecs = remaining,
+            onDismiss = onDismissCooldown,
         )
     }
 }
